@@ -17,6 +17,7 @@ export let REACT_ELEMENT_TYPE = 0xeac7;
 export let REACT_PORTAL_TYPE = 0xeaca;
 export let REACT_FRAGMENT_TYPE = 0xeacb;
 export let REACT_STRICT_MODE_TYPE = 0xeacc;
+export let REACT_SMOOSH_MODE_TYPE = 0xeaff;
 export let REACT_PROFILER_TYPE = 0xead2;
 export let REACT_PROVIDER_TYPE = 0xeacd;
 export let REACT_CONTEXT_TYPE = 0xeace;
@@ -40,6 +41,7 @@ if (typeof Symbol === 'function' && Symbol.for) {
   REACT_PORTAL_TYPE = symbolFor('react.portal');
   REACT_FRAGMENT_TYPE = symbolFor('react.fragment');
   REACT_STRICT_MODE_TYPE = symbolFor('react.strict_mode');
+  REACT_SMOOSH_MODE_TYPE = symbolFor('react.smoosh');
   REACT_PROFILER_TYPE = symbolFor('react.profiler');
   REACT_PROVIDER_TYPE = symbolFor('react.provider');
   REACT_CONTEXT_TYPE = symbolFor('react.context');

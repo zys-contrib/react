@@ -27,6 +27,7 @@ import type {
 } from './ReactFiberSuspenseComponent.old';
 import type {SuspenseContext} from './ReactFiberSuspenseContext.old';
 import type {OffscreenState} from './ReactFiberOffscreenComponent';
+import {SmooshMode} from './ReactTypeOfMode';
 
 import {resetWorkInProgressVersions as resetMutableSourceWorkInProgressVersions} from './ReactMutableSource.old';
 
@@ -164,7 +165,11 @@ if (supportsMutation) {
     // children to find all the terminal nodes.
     let node = workInProgress.child;
     while (node !== null) {
-      if (node.tag === HostComponent || node.tag === HostText) {
+      if (node.tag === HostComponent &&
+        ( node.type !== 'div' || (node.mode & SmooshMode) !== SmooshMode) ||
+        node.tag === HostText
+      ) {
+        // console.log('host componet init', node.type)
         appendInitialChild(parent, node.stateNode);
       } else if (enableFundamentalAPI && node.tag === FundamentalComponent) {
         appendInitialChild(parent, node.stateNode.instance);
@@ -744,31 +749,33 @@ function completeWork(
             markUpdate(workInProgress);
           }
         } else {
-          const instance = createInstance(
-            type,
-            newProps,
-            rootContainerInstance,
-            currentHostContext,
-            workInProgress,
-          );
-
-          appendAllChildren(instance, workInProgress, false, false);
-
-          workInProgress.stateNode = instance;
-
-          // Certain renderers require commit-time effects for initial mount.
-          // (eg DOM renderer supports auto-focus for certain elements).
-          // Make sure such renderers get scheduled for later work.
-          if (
-            finalizeInitialChildren(
-              instance,
+          if (type !== 'div' || (workInProgress.mode & SmooshMode) !== SmooshMode) {
+            const instance = createInstance(
               type,
               newProps,
               rootContainerInstance,
               currentHostContext,
-            )
-          ) {
-            markUpdate(workInProgress);
+              workInProgress,
+            );
+
+            appendAllChildren(instance, workInProgress, false, false);
+
+            workInProgress.stateNode = instance;
+
+            // Certain renderers require commit-time effects for initial mount.
+            // (eg DOM renderer supports auto-focus for certain elements).
+            // Make sure such renderers get scheduled for later work.
+            if (
+              finalizeInitialChildren(
+                instance,
+                type,
+                newProps,
+                rootContainerInstance,
+                currentHostContext,
+              )
+            ) {
+              markUpdate(workInProgress);
+            }
           }
         }
 

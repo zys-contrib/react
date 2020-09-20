@@ -63,6 +63,7 @@ export {
   Profiler,
   unstable_DebugTracingMode,
   StrictMode,
+  SmooshMode,
   Suspense,
   createElement,
   cloneElement,

@@ -24,7 +24,7 @@ import type {FunctionComponentUpdateQueue} from './ReactFiberHooks.old';
 import type {Wakeable} from 'shared/ReactTypes';
 import type {ReactPriorityLevel} from './ReactInternalTypes';
 import type {OffscreenState} from './ReactFiberOffscreenComponent';
-
+import {SmooshMode} from './ReactTypeOfMode';
 import {unstable_wrap as Schedule_tracing_wrap} from 'scheduler/tracing';
 import {
   enableSchedulerTracing,
@@ -1231,7 +1231,7 @@ function insertOrAppendPlacementNodeIntoContainer(
 ): void {
   const {tag} = node;
   const isHost = tag === HostComponent || tag === HostText;
-  if (isHost || (enableFundamentalAPI && tag === FundamentalComponent)) {
+  if (isHost && (node.type !== 'div' || (node.mode & SmooshMode) !== SmooshMode) || (enableFundamentalAPI && tag === FundamentalComponent)) {
     const stateNode = isHost ? node.stateNode : node.stateNode.instance;
     if (before) {
       insertInContainerBefore(parent, stateNode, before);

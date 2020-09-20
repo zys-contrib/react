@@ -38,6 +38,7 @@ export default function isValidElementType(type: mixed) {
     type === REACT_PROFILER_TYPE ||
     type === REACT_DEBUG_TRACING_MODE_TYPE ||
     type === REACT_STRICT_MODE_TYPE ||
+    type === Symbol.for('react.smoosh') ||
     type === REACT_SUSPENSE_TYPE ||
     type === REACT_SUSPENSE_LIST_TYPE ||
     type === REACT_LEGACY_HIDDEN_TYPE ||

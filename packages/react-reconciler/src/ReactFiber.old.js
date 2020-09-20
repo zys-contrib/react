@@ -73,6 +73,7 @@ import {
   ProfileMode,
   StrictMode,
   BlockingMode,
+  SmooshMode,
 } from './ReactTypeOfMode';
 import {
   REACT_FORWARD_REF_TYPE,
@@ -483,6 +484,10 @@ export function createFiberFromTypeAndProps(
       case REACT_STRICT_MODE_TYPE:
         fiberTag = Mode;
         mode |= StrictMode;
+        break;
+      case Symbol.for('react.smoosh'):
+        fiberTag = Mode;
+        mode |= SmooshMode;
         break;
       case REACT_PROFILER_TYPE:
         return createFiberFromProfiler(pendingProps, mode, lanes, key);
