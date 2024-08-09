@@ -456,6 +456,173 @@ describe('ReactFlightDOMBrowser', () => {
     expect(container.innerHTML).toBe('{}');
   });
 
+  it('should resolve deduped objects in blocked models referencing other blocked models with blocked references', async () => {
+    let resolveFooClientComponentChunk;
+    let resolveBarClientComponentChunk;
+
+    function PassthroughServerComponent({children}) {
+      return children;
+    }
+
+    const FooClient = clientExports(
+      function FooClient({children}) {
+        return JSON.stringify(children);
+      },
+      '1',
+      '/foo.js',
+      new Promise(resolve => (resolveFooClientComponentChunk = resolve)),
+    );
+
+    const BarClient = clientExports(
+      function BarClient() {
+        return 'not used';
+      },
+      '2',
+      '/bar.js',
+      new Promise(resolve => (resolveBarClientComponentChunk = resolve)),
+    );
+
+    const shared = {foo: 1};
+
+    function Server() {
+      return (
+        <>
+          <PassthroughServerComponent>
+            <FooClient key="first" bar={BarClient}>
+              {shared}
+            </FooClient>
+          </PassthroughServerComponent>
+          <FooClient key="second" bar={BarClient}>
+            {shared}
+          </FooClient>
+        </>
+      );
+    }
+
+    const stream = await serverAct(() =>
+      ReactServerDOMServer.renderToReadableStream(<Server />, webpackMap),
+    );
+
+    function ClientRoot({response}) {
+      return use(response);
+    }
+
+    const response = ReactServerDOMClient.createFromReadableStream(stream);
+    const container = document.createElement('div');
+    const root = ReactDOMClient.createRoot(container);
+
+    await act(() => {
+      root.render(<ClientRoot response={response} />);
+    });
+
+    expect(container.innerHTML).toBe('');
+
+    await act(() => {
+      resolveFooClientComponentChunk();
+      resolveBarClientComponentChunk();
+    });
+
+    expect(container.innerHTML).toBe('{"foo":1}{"foo":1}');
+  });
+
+  it('should handle deduped props of re-used elements in fragments (same-chunk reference)', async () => {
+    let resolveFooClientComponentChunk;
+
+    const FooClient = clientExports(
+      function Foo({children, item}) {
+        return children;
+      },
+      '1',
+      '/foo.js',
+      new Promise(resolve => (resolveFooClientComponentChunk = resolve)),
+    );
+
+    const shared = <div />;
+
+    function Server() {
+      return (
+        <FooClient track={shared}>
+          <>{shared}</>
+        </FooClient>
+      );
+    }
+
+    const stream = await serverAct(() =>
+      ReactServerDOMServer.renderToReadableStream(<Server />, webpackMap),
+    );
+
+    function ClientRoot({response}) {
+      return use(response);
+    }
+
+    const response = ReactServerDOMClient.createFromReadableStream(stream);
+    const container = document.createElement('div');
+    const root = ReactDOMClient.createRoot(container);
+
+    await act(() => {
+      root.render(<ClientRoot response={response} />);
+    });
+
+    expect(container.innerHTML).toBe('');
+
+    await act(() => {
+      resolveFooClientComponentChunk();
+    });
+
+    expect(container.innerHTML).toBe('<div></div>');
+  });
+
+  it('should handle deduped props of re-used elements in server components (cross-chunk reference)', async () => {
+    let resolveFooClientComponentChunk;
+
+    function PassthroughServerComponent({children}) {
+      return children;
+    }
+
+    const FooClient = clientExports(
+      function Foo({children, item}) {
+        return children;
+      },
+      '1',
+      '/foo.js',
+      new Promise(resolve => (resolveFooClientComponentChunk = resolve)),
+    );
+
+    const shared = <div />;
+
+    function Server() {
+      return (
+        <FooClient track={shared}>
+          <PassthroughServerComponent>{shared}</PassthroughServerComponent>
+        </FooClient>
+      );
+    }
+
+    const stream = await serverAct(() =>
+      ReactServerDOMServer.renderToReadableStream(<Server />, webpackMap),
+    );
+
+    function ClientRoot({response}) {
+      return use(response);
+    }
+
+    const response = ReactServerDOMClient.createFromReadableStream(stream);
+    const container = document.createElement('div');
+    const root = ReactDOMClient.createRoot(container);
+
+    await act(() => {
+      root.render(<ClientRoot response={response} />);
+    });
+
+    expect(container.innerHTML).toBe('');
+
+    await act(() => {
+      resolveFooClientComponentChunk();
+    });
+
+    expect(container.innerHTML).toBe('<div></div>');
+  });
+
   it('should progressively reveal server components', async () => {
     let reportedErrors = [];
 
