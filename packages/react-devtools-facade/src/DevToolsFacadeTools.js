@@ -55,7 +55,10 @@ export type Tools = {
     depth?: number,
     rootUid?: string,
   ) => Array<TreeNode> | ToolError,
-  getComponentByUid: (uid: string) => NodeInfo | ToolError,
+  getComponentByUid: (
+    uid: string,
+    includeHooks?: boolean,
+  ) => NodeInfo | ToolError,
   findComponents: (
     name: string,
     rootUid?: string,

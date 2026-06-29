@@ -24,7 +24,7 @@ import type {RendererInternals} from './DevToolsFacade';
 // (to TOON, JSON, etc.) is the integrator's responsibility.
 
 // Returned by any tool when the requested component/root cannot be resolved.
-export type ToolError = {error: string};
+export type ToolError = {error: string | Error};
 
 // A single component in a tree snapshot. firstChild/nextSibling reference other
 // nodes by their uid, forming an adjacency list the integrator can rebuild.
@@ -81,7 +81,10 @@ export type TreeTools = {
     depth?: number,
     rootUid?: string,
   ) => Array<TreeNode> | ToolError,
-  getComponentByUid: (uid: string) => NodeInfo | ToolError,
+  getComponentByUid: (
+    uid: string,
+    includeHooks?: boolean,
+  ) => NodeInfo | ToolError,
   findComponents: (
     name: string,
     rootUid?: string,
@@ -414,16 +417,21 @@ export function createTreeTools(
   }
 
   /**
-   * Returns detailed info about a single component by its uid: type, name,
-   * key, props (excluding children), and — for function components — the
-   * inspected hooks tree. Values are normalized to a serialization-safe shape.
+   * Returns detailed info about a single component by its uid: type, name, key,
+   * and props (excluding children). Values are normalized to a serialization-safe
+   * shape.
    *
-   * Inspecting hooks re-renders the component's render function (effects are
-   * not run); failures are tolerated and simply omit `hooks`.
+   * If includeHooks is true, function components also include the inspected
+   * hooks tree. Inspecting hooks re-renders the component's render function
+   * (effects are not run); failures return an error payload.
    *
    * @param uid - The component uid (e.g. "r5").
+   * @param includeHooks - Whether to inspect hooks for function components.
    */
-  function getComponentByUid(uid: string): NodeInfo | ToolError {
+  function getComponentByUid(
+    uid: string,
+    includeHooks?: boolean = false,
+  ): NodeInfo | ToolError {
     const result = findFiberByUid(uid);
     if (result.error != null) {
       return {error: result.error};
@@ -441,26 +449,30 @@ export function createTreeTools(
     if (props != null) {
       info.props = props;
     }
-    // Hooks are only inspectable for function components, forwardRef, and
-    // simple-memo components. inspectHooksOfFiberWithoutDefaultDispatcher
-    // re-renders the component (using the renderer's injected dispatcher, never
-    // React's shared internals), so guard by tag and tolerate failures (e.g. a
-    // component that throws).
-    const {FunctionComponent, SimpleMemoComponent, ForwardRef} =
-      internals.ReactTypeOfWork;
-    if (
-      fiber.tag === FunctionComponent ||
-      fiber.tag === SimpleMemoComponent ||
-      fiber.tag === ForwardRef
-    ) {
-      try {
-        const hooksTree = inspectHooksOfFiberWithoutDefaultDispatcher(
-          fiber,
-          getDispatcherRef(internals),
-        );
-        info.hooks = normalizeHooks(hooksTree);
-      } catch {
-        // Hook inspection failed; omit hooks rather than failing the call.
+    if (includeHooks) {
+      // Hooks are only inspectable for function components, forwardRef, and
+      // simple-memo components. inspectHooksOfFiberWithoutDefaultDispatcher
+      // re-renders the component (using the renderer's injected dispatcher,
+      // never React's shared internals), so guard by tag and tolerate failures
+      // (e.g. a component that throws).
+      const {FunctionComponent, SimpleMemoComponent, ForwardRef} =
+        internals.ReactTypeOfWork;
+      if (
+        fiber.tag === FunctionComponent ||
+        fiber.tag === SimpleMemoComponent ||
+        fiber.tag === ForwardRef
+      ) {
+        try {
+          const hooksTree = inspectHooksOfFiberWithoutDefaultDispatcher(
+            fiber,
+            getDispatcherRef(internals),
+          );
+          info.hooks = normalizeHooks(hooksTree);
+        } catch (error) {
+          return {
+            error: new Error('Failed to inspect hooks.', {cause: error}),
+          };
+        }
       }
     }
     return info;
