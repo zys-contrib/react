@@ -82,7 +82,7 @@ export type Tools = {
  * runtime state (fiber roots, per-renderer internals, profiling state) lazily
  * on each call and never touch globals, so the integrator fully owns both the
  * facade and the returned tools. Profiler tools share the tree tools' getUid
- * so component labels are consistent across all tools.
+ * so component uids are consistent across all tools.
  *
  * @param facade - A Facade returned by installFacade().
  */
