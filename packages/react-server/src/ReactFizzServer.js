@@ -3213,7 +3213,10 @@ function replayElement(
         if (
           typeof x === 'object' &&
           x !== null &&
-          (x === SuspenseException || typeof x.then === 'function')
+          (x === SuspenseException ||
+            typeof x.then === 'function' ||
+            // Rethrow so retryReplayTask can trampoline on stack overflow.
+            x.message === 'Maximum call stack size exceeded')
         ) {
           // Suspend
           if (task.node === currentNode) {
@@ -5239,6 +5242,8 @@ function retryRenderTask(
 
   const childrenLength = segment.children.length;
   const chunkLength = segment.chunks.length;
+  // Used to detect forward progress if we hit a stack overflow below.
+  const startNode = task.node;
   try {
     // We call the destructive form that mutates this task. That way if something
     // suspends again, we can reuse the same task instead of spawning a new one.
@@ -5303,6 +5308,18 @@ function retryRenderTask(
         (x as any).then(ping.resolve, ping.reject);
         return;
       }
+      if (
+        x.message === 'Maximum call stack size exceeded' &&
+        task.node !== startNode
+      ) {
+        // Stack overflow after making forward progress. Retry from a fresh stack.
+        // No progress (e.g. overflow inside the component itself) falls through.
+        segment.status = PENDING;
+        task.thenableState = null;
+        // Immediately schedule the task for retrying.
+        request.pingedTasks.push(task);
+        return;
+      }
     }
 
     const errorInfo = getThrownInfo(task.componentStack);
@@ -5345,6 +5362,8 @@ function retryReplayTask(request: Request, task: ReplayTask): void {
     setCurrentTaskInDEV(task);
   }
 
+  // Used to detect forward progress if we hit a stack overflow below.
+  const startNode = task.node;
   try {
     // We call the destructive form that mutates this task. That way if something
     // suspends again, we can reuse the same task instead of spawning a new one.
@@ -5406,6 +5425,17 @@ function retryReplayTask(request: Request, task: ReplayTask): void {
           thrownValue === SuspenseException
             ? getThenableStateAfterSuspending()
             : null;
+        return;
+      }
+      if (
+        x.message === 'Maximum call stack size exceeded' &&
+        task.node !== startNode
+      ) {
+        // Stack overflow after making forward progress. Retry from a fresh stack.
+        // No progress (e.g. overflow inside the component itself) falls through.
+        task.thenableState = null;
+        // Immediately schedule the task for retrying.
+        request.pingedTasks.push(task);
         return;
       }
     }
