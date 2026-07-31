@@ -46,6 +46,7 @@ import {
   enableProfilerTimer,
   enableComponentPerformanceTrack,
   enableAsyncDebugInfo,
+  enableFlightWeakThenables,
 } from 'shared/ReactFeatureFlags';
 
 import {
@@ -150,12 +151,21 @@ const ROW_CHUNK_BY_LENGTH = 4;
 type RowParserState = 0 | 1 | 2 | 3 | 4;
 
 const PENDING = 'pending';
+// A weak Promise reference. Behaves like PENDING except that when the stream
+// closes it transitions to HALTED instead of erroring, because the server
+// may intentionally never emit it. Only used when enableFlightWeakThenables
+// is on.
+const PENDING_WEAK = 'pending_weak';
 const BLOCKED = 'blocked';
 const RESOLVED_MODEL = 'resolved_model';
 const RESOLVED_MODULE = 'resolved_module';
 const INITIALIZED = 'fulfilled';
 const ERRORED = 'rejected';
-const HALTED = 'halted'; // DEV-only. Means it never resolves even if connection closes.
+// Means it never resolves, even when the connection closes. The shared
+// terminal state of a weak chunk that didn't settle before close, of any
+// pending chunk at close when partial streams are allowed, and of DEV-only
+// debug halts.
+const HALTED = 'halted';
 
 const __PROTO__ = '__proto__';
 
@@ -164,6 +174,15 @@ const ArrayPrototype = Array.prototype;
 
 type PendingChunk<T> = {
   status: 'pending',
+  value: null | Array<InitializationReference | (T => mixed)>,
+  reason: null | Array<InitializationReference | (mixed => mixed)>,
+  _children: Array<SomeChunk<any>> | ProfilingResult, // Profiling-only
+  _debugChunk: null | SomeChunk<ReactDebugInfoEntry>, // DEV-only
+  _debugInfo: ReactDebugInfo, // DEV-only
+  then(resolve: (T) => mixed, reject?: (mixed) => mixed): void,
+};
+type PendingWeakChunk<T> = {
+  status: 'pending_weak',
   value: null | Array<InitializationReference | (T => mixed)>,
   reason: null | Array<InitializationReference | (mixed => mixed)>,
   _children: Array<SomeChunk<any>> | ProfilingResult, // Profiling-only
@@ -238,6 +257,7 @@ type HaltedChunk<T> = {
 };
 type SomeChunk<T> =
   | PendingChunk<T>
+  | PendingWeakChunk<T>
   | BlockedChunk<T>
   | ResolvedModelChunk<T>
   | ResolvedModuleChunk<T>
@@ -306,6 +326,7 @@ function reactPromiseThen<T>(
       }
       break;
     case PENDING:
+    case PENDING_WEAK:
     case BLOCKED:
       if (typeof resolve === 'function') {
         if (chunk.value === null) {
@@ -449,6 +470,7 @@ function readChunk<T>(chunk: SomeChunk<T>): T {
     case INITIALIZED:
       return chunk.value;
     case PENDING:
+    case PENDING_WEAK:
     case BLOCKED:
     case HALTED:
       // eslint-disable-next-line no-throw-literal
@@ -479,6 +501,13 @@ function createPendingChunk<T>(response: Response): PendingChunk<T> {
   return new ReactPromise(PENDING, null, null);
 }
 
+function createPendingWeakChunk<T>(response: Response): PendingWeakChunk<T> {
+  // Unlike a regular pending chunk, a weak chunk may never settle, so it
+  // doesn't retain a strong reference to the Response while it waits.
+  // $FlowFixMe[invalid-constructor] Flow doesn't support functions as constructors
+  return new ReactPromise(PENDING_WEAK, null, null);
+}
+
 function releasePendingChunk(response: Response, chunk: SomeChunk<any>): void {
   if (__DEV__ && chunk.status === PENDING) {
     if (--response._pendingChunks === 0) {
@@ -495,6 +524,22 @@ function releasePendingChunk(response: Response, chunk: SomeChunk<any>): void {
       );
     }
   }
+}
+
+function createHaltedChunk<T>(response: Response): HaltedChunk<T> {
+  // $FlowFixMe[invalid-constructor] Flow doesn't support functions as constructors
+  return new ReactPromise(HALTED, null, null);
+}
+
+// Transition a chunk to HALTED: it will never resolve, even when the
+// connection closes. Clears any listeners to release their closures. Future
+// .then() calls on HALTED chunks are no-ops.
+function haltChunk<T>(response: Response, chunk: SomeChunk<T>): void {
+  releasePendingChunk(response, chunk);
+  const haltedChunk: HaltedChunk<T> = chunk as any;
+  haltedChunk.status = HALTED;
+  haltedChunk.value = null;
+  haltedChunk.reason = null;
 }
 
 function createBlockedChunk<T>(response: Response): BlockedChunk<T> {
@@ -755,7 +800,11 @@ function triggerErrorOnChunk<T>(
   chunk: SomeChunk<T>,
   error: mixed,
 ): void {
-  if (chunk.status !== PENDING && chunk.status !== BLOCKED) {
+  if (
+    chunk.status !== PENDING &&
+    chunk.status !== PENDING_WEAK &&
+    chunk.status !== BLOCKED
+  ) {
     // If we get more data to an already resolved ID, we assume that it's
     // a stream chunk since any other row shouldn't have more than one entry.
     const streamChunk: InitializedStreamChunk<any> = chunk as any;
@@ -767,7 +816,7 @@ function triggerErrorOnChunk<T>(
   releasePendingChunk(response, chunk);
   const listeners = chunk.reason;
 
-  if (__DEV__ && chunk.status === PENDING) {
+  if (__DEV__ && (chunk.status === PENDING || chunk.status === PENDING_WEAK)) {
     // Lazily initialize any debug info and block the initializing chunk on any unresolved entries.
     if (chunk._debugChunk != null) {
       const prevHandler = initializingHandler;
@@ -898,7 +947,7 @@ function resolveModelChunk<T>(
   chunk: SomeChunk<T>,
   value: UninitializedModel,
 ): void {
-  if (chunk.status !== PENDING) {
+  if (chunk.status !== PENDING && chunk.status !== PENDING_WEAK) {
     // If we get more data to an already resolved ID, we assume that it's
     // a stream chunk since any other row shouldn't have more than one entry.
     const streamChunk: InitializedStreamChunk<any> = chunk as any;
@@ -928,7 +977,11 @@ function resolveModuleChunk<T>(
   chunk: SomeChunk<T>,
   value: ClientReference<T>,
 ): void {
-  if (chunk.status !== PENDING && chunk.status !== BLOCKED) {
+  if (
+    chunk.status !== PENDING &&
+    chunk.status !== PENDING_WEAK &&
+    chunk.status !== BLOCKED
+  ) {
     // We already resolved. We didn't expect to see this.
     return;
   }
@@ -980,7 +1033,7 @@ let isInitializingDebugInfo: boolean = false;
 
 function initializeDebugChunk(
   response: Response,
-  chunk: ResolvedModelChunk<any> | PendingChunk<any>,
+  chunk: ResolvedModelChunk<any> | PendingChunk<any> | PendingWeakChunk<any>,
 ): void {
   const debugChunk = chunk._debugChunk;
   if (debugChunk !== null) {
@@ -1010,7 +1063,8 @@ function initializeDebugChunk(
             break;
           }
           case BLOCKED:
-          case PENDING: {
+          case PENDING:
+          case PENDING_WEAK: {
             waitForReference(
               initializedChunk,
               debugInfo,
@@ -1032,7 +1086,8 @@ function initializeDebugChunk(
             break;
           }
           case BLOCKED:
-          case PENDING: {
+          case PENDING:
+          case PENDING_WEAK: {
             // Signal to the caller that we need to wait.
             waitForReference(
               debugChunk,
@@ -1168,6 +1223,10 @@ export function reportGlobalError(
     // because we won't be getting any new data to resolve it.
     if (chunk.status === PENDING) {
       triggerErrorOnChunk(response, chunk, error);
+    } else if (enableFlightWeakThenables && chunk.status === PENDING_WEAK) {
+      // A weak Promise reference may never be emitted by the server. It
+      // stays forever pending instead of erroring.
+      haltChunk(response, chunk);
     } else if (chunk.status === INITIALIZED && chunk.reason !== null) {
       chunk.reason.error(error);
     }
@@ -1502,11 +1561,7 @@ function getChunk(response: Response, id: number): SomeChunk<any> {
       if (response._allowPartialStream) {
         // For partial streams, chunks accessed after close should be HALTED
         // (never resolve).
-        chunk = createPendingChunk(response);
-        const haltedChunk: HaltedChunk<any> = chunk as any;
-        haltedChunk.status = HALTED;
-        haltedChunk.value = null;
-        haltedChunk.reason = null;
+        chunk = createHaltedChunk(response);
       } else {
         // We have already errored the response and we're not going to get
         // anything more streaming in so this will immediately error.
@@ -1514,6 +1569,25 @@ function getChunk(response: Response, id: number): SomeChunk<any> {
       }
     } else {
       chunk = createPendingChunk(response);
+    }
+    chunks.set(id, chunk);
+  }
+  return chunk;
+}
+
+// Like getChunk, but for weak Promise references. The server may never emit
+// the row for a weak reference, so an unresolved weak chunk halts (stays
+// forever pending) instead of erroring when the stream closes.
+function getWeakChunk(response: Response, id: number): SomeChunk<any> {
+  const chunks = response._chunks;
+  let chunk = chunks.get(id);
+  if (!chunk) {
+    if (response._closed) {
+      // The stream already closed without emitting this row, so it will
+      // never resolve.
+      chunk = createHaltedChunk(response);
+    } else {
+      chunk = createPendingWeakChunk(response);
     }
     chunks.set(id, chunk);
   }
@@ -1574,7 +1648,8 @@ function fulfillReference(
               }
               // Fallthrough
             }
-            case PENDING: {
+            case PENDING:
+            case PENDING_WEAK: {
               // If we're not yet initialized we need to skip what we've already drilled
               // through and then wait for the next value to become available.
               path.splice(0, i - 1);
@@ -1778,7 +1853,7 @@ function rejectReference(
 }
 
 function waitForReference<T>(
-  referencedChunk: PendingChunk<T> | BlockedChunk<T>,
+  referencedChunk: PendingChunk<T> | PendingWeakChunk<T> | BlockedChunk<T>,
   parentObject: Object,
   key: string,
   response: Response,
@@ -2124,7 +2199,8 @@ function getOutlinedModel<T>(
               break;
             }
             case BLOCKED:
-            case PENDING: {
+            case PENDING:
+            case PENDING_WEAK: {
               return waitForReference(
                 referencedChunk,
                 parentObject,
@@ -2233,6 +2309,7 @@ function getOutlinedModel<T>(
       }
       return chunkValue;
     case PENDING:
+    case PENDING_WEAK:
     case BLOCKED:
       return waitForReference(
         chunk,
@@ -2468,6 +2545,23 @@ function parseModelString(
           }
         }
         return chunk;
+      }
+      case 'w': {
+        if (enableFlightWeakThenables) {
+          // Weak Promise
+          const id = parseInt(value.slice(2), 16);
+          const chunk = getWeakChunk(response, id);
+          if (enableProfilerTimer && enableComponentPerformanceTrack) {
+            if (
+              initializingChunk !== null &&
+              isArray(initializingChunk._children)
+            ) {
+              initializingChunk._children.push(chunk);
+            }
+          }
+          return chunk;
+        }
+        return undefined;
       }
       case 'S': {
         // Symbol
@@ -3035,14 +3129,14 @@ function resolveDebugHalt(response: Response, id: number): void {
     chunks.set(id, (chunk = createPendingChunk(response)));
   } else {
   }
-  if (chunk.status !== PENDING && chunk.status !== BLOCKED) {
+  if (
+    chunk.status !== PENDING &&
+    chunk.status !== PENDING_WEAK &&
+    chunk.status !== BLOCKED
+  ) {
     return;
   }
-  releasePendingChunk(response, chunk);
-  const haltedChunk: HaltedChunk<any> = chunk as any;
-  haltedChunk.status = HALTED;
-  haltedChunk.value = null;
-  haltedChunk.reason = null;
+  haltChunk(response, chunk);
 }
 
 function resolveModel(
@@ -5428,14 +5522,11 @@ export function close(weakResponse: WeakResponse): void {
     // For partial streams, we halt pending chunks instead of erroring them.
     response._closed = true;
     response._chunks.forEach(chunk => {
-      if (chunk.status === PENDING) {
-        // Clear listeners to release closures and transition to HALTED.
-        // Future .then() calls on HALTED chunks are no-ops.
-        releasePendingChunk(response, chunk);
-        const haltedChunk: HaltedChunk<any> = chunk as any;
-        haltedChunk.status = HALTED;
-        haltedChunk.value = null;
-        haltedChunk.reason = null;
+      if (
+        chunk.status === PENDING ||
+        (enableFlightWeakThenables && chunk.status === PENDING_WEAK)
+      ) {
+        haltChunk(response, chunk);
       } else if (chunk.status === INITIALIZED && chunk.reason !== null) {
         // Stream chunk - close gracefully instead of erroring.
         chunk.reason.close('"$undefined"');
