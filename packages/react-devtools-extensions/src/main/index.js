@@ -15,6 +15,7 @@ import {flushSync} from 'react-dom';
 import {createRoot} from 'react-dom/client';
 import Bridge from 'react-devtools-shared/src/bridge';
 import Store from 'react-devtools-shared/src/devtools/store';
+import {subscribeToStoreErrors} from 'react-devtools-shared/src/devtools/storeErrorLogger';
 import {getBrowserTheme} from '../utils';
 import {
   localStorageGetItem,
@@ -260,6 +261,7 @@ function createDevToolsInstance(): DevToolsInstance {
     supportsInspectMatchingDOMElement: true,
     supportsClickToInspect: true,
   });
+  subscribeToStoreErrors(store, bridge);
 
   store.addListener('settingsUpdated', (hookSettings, componentFilters) => {
     chrome.storage.local.set({...hookSettings, componentFilters});
