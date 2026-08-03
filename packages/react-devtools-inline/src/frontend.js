@@ -17,7 +17,6 @@ export function createStore(bridge: FrontendBridge, config?: Config): Store {
   const store = new Store(bridge, {
     checkBridgeProtocolCompatibility: true,
     supportsTraceUpdates: true,
-    supportsTimeline: true,
     ...config,
   });
   subscribeToStoreErrors(store, bridge);
