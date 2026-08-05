@@ -18,6 +18,7 @@ export type IconType =
   | 'copy'
   | 'error'
   | 'facebook'
+  | 'find'
   | 'flame-chart'
   | 'profiler'
   | 'ranked-chart'
@@ -76,6 +77,10 @@ export default function Icon({
       break;
     case 'search':
       pathData = PATH_SEARCH;
+      break;
+    case 'find':
+      pathData = PATH_FIND;
+      viewBox = '0 0 16 16';
       break;
     case 'settings':
       pathData = PATH_SETTINGS;
@@ -160,6 +165,10 @@ const PATH_SEARCH = `
   16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99
   5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z
 `;
+
+const PATH_FIND =
+  'M6.5 0.5a6 6 0 1 0 0 12 6 6 0 0 0 0-12zm0 1.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9z' +
+  'M11.17 10.03l3.7 3.7a0.8 0.8 0 0 1-1.14 1.14l-3.7-3.7z';
 
 const PATH_RANKED_CHART = 'M3 5h18v3H3zM3 10.5h13v3H3zM3 16h8v3H3z';
 

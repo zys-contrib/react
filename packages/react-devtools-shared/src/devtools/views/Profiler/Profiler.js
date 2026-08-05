@@ -11,6 +11,8 @@ import * as React from 'react';
 import {Fragment, useContext, useEffect, useRef, useEffectEvent} from 'react';
 import {ModalDialog} from '../ModalDialog';
 import {ProfilerContext} from './ProfilerContext';
+import Button from '../Button';
+import ButtonIcon from '../ButtonIcon';
 import TabBar from '../TabBar';
 import ClearProfilingDataButton from './ClearProfilingDataButton';
 import CommitFlamegraph from './CommitFlamegraph';
@@ -20,6 +22,7 @@ import RecordToggle from './RecordToggle';
 import ReloadAndProfileButton from './ReloadAndProfileButton';
 import ProfilingImportExportButtons from './ProfilingImportExportButtons';
 import SnapshotSelector from './SnapshotSelector';
+import ProfilerSearchInput from './ProfilerSearchInput';
 import SidebarCommitInfo from './SidebarCommitInfo';
 import NoProfilingData from './NoProfilingData';
 import RecordingInProgress from './RecordingInProgress';
@@ -52,6 +55,9 @@ function Profiler(_: {}) {
     stopProfiling,
     selectPrevCommitIndex,
     selectNextCommitIndex,
+    isSearchInputVisible,
+    showSearchInput,
+    hideSearchInput,
   } = useContext(ProfilerContext);
 
   const handleKeyDown = useEffectEvent((event: KeyboardEvent) => {
@@ -63,6 +69,16 @@ function Profiler(_: {}) {
       } else {
         startProfiling();
       }
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (didRecordCommits && correctModifier && event.key === 'f') {
+      // Cmd+F (Mac) or Ctrl+F (Windows/Linux) to search components in the commit
+      showSearchInput();
+      event.preventDefault();
+      event.stopPropagation();
+    } else if (isSearchInputVisible && event.key === 'Escape') {
+      // Escape closes the search input.
+      hideSearchInput();
       event.preventDefault();
       event.stopPropagation();
     } else if (didRecordCommits && selectedCommitIndex !== null) {
@@ -88,9 +104,11 @@ function Profiler(_: {}) {
       return;
     }
     const ownerWindow = div.ownerDocument.defaultView;
-    ownerWindow.addEventListener('keydown', handleKeyDown);
+    // Capture phase: Cmd/Ctrl+F is a reserved browser shortcut (Find), so we
+    // must intercept it before the browser to open our own search instead.
+    ownerWindow.addEventListener('keydown', handleKeyDown, true);
     return () => {
-      ownerWindow.removeEventListener('keydown', handleKeyDown);
+      ownerWindow.removeEventListener('keydown', handleKeyDown, true);
     };
   }, []);
 
@@ -163,11 +181,26 @@ function Profiler(_: {}) {
             {didRecordCommits && (
               <Fragment>
                 <div className={styles.VRule} />
+                <Button
+                  onClick={
+                    isSearchInputVisible ? hideSearchInput : showSearchInput
+                  }
+                  title={`Search components in this commit (${
+                    isMac ? '⌘' : 'Ctrl+'
+                  }F)`}
+                  data-testname="ProfilerSearchButton">
+                  <ButtonIcon type="find" />
+                </Button>
                 <SnapshotSelector />
               </Fragment>
             )}
           </div>
           <div className={styles.Content}>
+            {didRecordCommits && isSearchInputVisible && (
+              <div className={styles.SearchInputOverlay}>
+                <ProfilerSearchInput />
+              </div>
+            )}
             {view}
             <ModalDialog />
           </div>
